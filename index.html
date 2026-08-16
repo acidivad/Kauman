@@ -6,9 +6,9 @@
     <title>Kauman - Portable RSVP Reader</title>
 
     <!-- PDF.js for parsing PDF files -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-    <!-- Mammoth.js for parsing DOCX files -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.21/mammoth.browser.min.js"></script>
+    <!-- Local PDF.js & Mammoth.js -->
+    <script src="pdf.min.js"></script>
+    <script src="mammoth.browser.min.js"></script>
 
     <style>
         :root {
@@ -219,7 +219,7 @@
 
     <script>
         // Setup PDF.js Worker
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
 
         // DOM Elements
         const fileInput = document.getElementById('fileInput');
