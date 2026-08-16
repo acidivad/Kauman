@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kauman - Portable RSVP Reader</title>
+
+    <!-- PDF.js for parsing PDF files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <!-- Mammoth.js for parsing DOCX files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.21/mammoth.browser.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #f4f4f5;
+            --surface: #ffffff;
+            --text-main: #18181b;
+            --text-muted: #71717a;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --highlight: rgb(255, 0, 0); /* Highlight set to pure red */
+        }
+        
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #09090b;
+                --surface: #18181b;
+                --text-main: #f4f4f5;
+                --text-muted: #a1a1aa;
+                --highlight: rgb(255, 0, 0); /* Highlight set to pure red */
+            }
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 1rem;
+            transition: background-color 0.3s ease;
+        }
+
+        .container {
+            background: var(--surface);
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 800px; /* Increased size to prevent cutoffs */
+            text-align: center;
+        }
+
+        /* --- Reader Box --- */
+        .reader-box {
+            height: 250px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px dashed var(--text-muted);
+            border-radius: 0.5rem;
+            margin: 1.5rem 0;
+            font-size: 3.5rem;
+            font-weight: bold;
+            overflow: hidden;
+            padding: 1rem;
+            font-family: "Times New Roman", Times, serif;
+        }
+
+        .word-wrapper {
+            display: flex;
+            width: 100%;
+            justify-content: center;
+        }
+
+        .word-wrapper .pivot {
+            color: var(--highlight);
+        }
+
+        .reader-box.align-center .word-wrapper .left {
+            flex: 1;
+            text-align: right;
+        }
+        .reader-box.align-center .word-wrapper .pivot {
+            flex: 0 0 auto;
+        }
+        .reader-box.align-center .word-wrapper .right {
+            flex: 1;
+            text-align: left;
+        }
+
+        /* --- Controls & Sliders --- */
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover { background-color: var(--primary-hover); }
+        button:disabled { background-color: var(--text-muted); cursor: not-allowed; }
+        
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            width: 100%;
+        }
+
+        .toggle-group {
+            display: flex;
+            gap: 1.5rem;
+            margin-top: 0.5rem;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .stats {
+            margin-top: 1rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        /* --- Zen Mode Overrides --- */
+        body.zen-mode .container {
+            box-shadow: none;
+            background: transparent;
+            max-width: 100vw;
+            padding: 0;
+        }
+        
+        body.zen-mode .reader-box {
+            border: none;
+            height: 100vh; 
+            margin: 0;
+        }
+
+        body.zen-mode h2, 
+        body.zen-mode p, 
+        body.zen-mode input[type="file"],
+        body.zen-mode .controls, 
+        body.zen-mode .stats {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>Kauman</h2>
+        <p style="color: var(--text-muted); margin-bottom: 1rem;">Select a TXT, PDF, or DOCX file</p>
+        
+        <input type="file" id="fileInput" accept=".txt,.pdf,.docx">
+
+        <div class="reader-box" id="wordDisplay">
+            <div class="word-wrapper">Ready</div>
+        </div>
+
+        <div class="controls">
+            <div class="row">
+                <!-- Added Rewind Button -->
+                <button id="rewindBtn" disabled>⏪ -10 Words</button>
+                <button id="playBtn" disabled>Play</button>
+                <button id="pauseBtn" disabled>Pause</button>
+                <button id="resetBtn" disabled>Reset</button>
+            </div>
+
+            <div class="row toggle-group">
+                <label>
+                    <input type="checkbox" id="alignToggle"> Center Pivot Letter
+                </label>
+                <label>
+                    <input type="checkbox" id="zenToggle"> Zen Mode (Press Esc to exit)
+                </label>
+            </div>
+
+            <div class="row">
+                <div class="slider-group">
+                    <label for="wpmSlider">Speed: <span id="wpmValue">400</span> WPM</label>
+                    <input type="range" id="wpmSlider" min="100" max="1000" step="50" value="400">
+                </div>
+                
+                <div class="slider-group">
+                    <label for="fontSlider">Font Size: <span id="fontValue">3.5</span>rem</label>
+                    <input type="range" id="fontSlider" min="2" max="10" step="0.5" value="3.5">
+                </div>
+            </div>
+        </div>
+
+        <div class="stats" id="statsDisplay">
+            Words loaded: 0 | Progress: 0%
+            <br><small>(Tip: Use the Spacebar to Play/Pause)</small>
+        </div>
+    </div>
+
+    <script>
+        // Setup PDF.js Worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+        // DOM Elements
+        const fileInput = document.getElementById('fileInput');
+        const wordDisplay = document.getElementById('wordDisplay');
+        const rewindBtn = document.getElementById('rewindBtn');
+        const playBtn = document.getElementById('playBtn');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        
+        const wpmSlider = document.getElementById('wpmSlider');
+        const wpmValue = document.getElementById('wpmValue');
+        const fontSlider = document.getElementById('fontSlider');
+        const fontValue = document.getElementById('fontValue');
+        
+        const alignToggle = document.getElementById('alignToggle');
+        const zenToggle = document.getElementById('zenToggle');
+        const statsDisplay = document.getElementById('statsDisplay');
+
+        // State variables
+        let file = null;
+        let isPlaying = false;
+        let timerId = null;
+        let wpm = 400;
+        let ext = "";
+        
+        // Storage states
+        const CHUNK_SIZE = 64 * 1024; 
+        const QUEUE_THRESHOLD = 100;
+        
+        // Chunked (.txt) reading state
+        let wordQueue = [];
+        let currentOffset = 0; 
+        let readHistoryTxt = []; // Buffer to store last 50 words read for rewinding .txt files
+        
+        // Fully-loaded (.pdf / .docx) reading state
+        let globalWordList = []; 
+        let globalWordIndex = 0; 
+
+        // Progress Save/Load (Using localStorage as "Cookies")
+        function saveProgress() {
+            if (!file) return;
+            const progress = ext === 'txt' ? currentOffset : globalWordIndex;
+            localStorage.setItem(`Kauman_progress_${file.name}`, progress);
+        }
+
+        function loadProgress() {
+            if (!file) return 0;
+            return parseInt(localStorage.getItem(`Kauman_progress_${file.name}`) || 0);
+        }
+
+        // Splits the word into 3 HTML spans for alignment and coloring
+        function formatWord(word) {
+            if (!word || word.length === 0) return "";
+            
+            const midIndex = Math.floor(word.length / 2);
+            const before = word.slice(0, midIndex);
+            const middle = word[midIndex];
+            const after = word.slice(midIndex + 1);
+            
+            return `
+                <div class="word-wrapper">
+                    <span class="left">${before}</span>
+                    <span class="pivot">${middle}</span>
+                    <span class="right">${after}</span>
+                </div>
+            `;
+        }
+
+        // File Parsing Logic
+        async function parseDocx(fileData) {
+            const arrayBuffer = await fileData.arrayBuffer();
+            const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+            globalWordList = result.value.trim().split(/\s+/).filter(w => w.length > 0);
+        }
+
+        async function parsePdf(fileData) {
+            const arrayBuffer = await fileData.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            let fullText = "";
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(" ");
+                fullText += pageText + " ";
+            }
+            globalWordList = fullText.trim().split(/\s+/).filter(w => w.length > 0);
+        }
+
+        // Handle file selection
+        fileInput.addEventListener('change', async (e) => {
+            if (e.target.files.length === 0) return;
+            file = e.target.files[0];
+            ext = file.name.split('.').pop().toLowerCase();
+            
+            pauseReading();
+            wordQueue = [];
+            globalWordList = [];
+            readHistoryTxt = [];
+            
+            rewindBtn.disabled = true;
+            playBtn.disabled = true;
+            resetBtn.disabled = true;
+            wordDisplay.innerHTML = `<div class="word-wrapper">Parsing File...</div>`;
+            
+            const savedProgress = loadProgress();
+
+            try {
+                if (ext === 'txt') {
+                    currentOffset = savedProgress;
+                    await fetchNextChunkLocally();
+                } else if (ext === 'docx') {
+                    await parseDocx(file);
+                    globalWordIndex = savedProgress;
+                    wordQueue = globalWordList.slice(globalWordIndex, globalWordIndex + QUEUE_THRESHOLD);
+                } else if (ext === 'pdf') {
+                    await parsePdf(file);
+                    globalWordIndex = savedProgress;
+                    wordQueue = globalWordList.slice(globalWordIndex, globalWordIndex + QUEUE_THRESHOLD);
+                } else {
+                    wordDisplay.innerHTML = `<div class="word-wrapper">Unsupported File</div>`;
+                    return;
+                }
+
+                rewindBtn.disabled = false;
+                playBtn.disabled = false;
+                resetBtn.disabled = false;
+                
+                if (wordQueue.length > 0) {
+                    wordDisplay.innerHTML = formatWord(wordQueue[0]);
+                } else {
+                    wordDisplay.innerHTML = `<div class="word-wrapper">Done!</div>`;
+                }
+                updateStats();
+
+            } catch (err) {
+                console.error("Error parsing file:", err);
+                wordDisplay.innerHTML = `<div class="word-wrapper">Error Parsing</div>`;
+            }
+        });
+
+        // Event Listeners for UI Controls
+        wpmSlider.addEventListener('input', (e) => {
+            wpm = e.target.value;
+            wpmValue.innerText = wpm;
+        });
+
+        fontSlider.addEventListener('input', (e) => {
+            wordDisplay.style.fontSize = `${e.target.value}rem`;
+            fontValue.innerText = e.target.value;
+        });
+
+        alignToggle.addEventListener('change', (e) => {
+            wordDisplay.classList.toggle('align-center', e.target.checked);
+        });
+
+        // Zen Mode & Mobile Auto-Rotation Logic
+        zenToggle.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                document.documentElement.requestFullscreen().then(() => {
+                    // Lock to landscape if API is supported (mainly mobile browsers)
+                    if (screen.orientation && screen.orientation.lock) {
+                        screen.orientation.lock('landscape').catch(err => {
+                            console.log("Landscape lock not supported on this device/browser.");
+                        });
+                    }
+                }).catch(console.error);
+            } else {
+                if (document.fullscreenElement) {
+                    document.exitFullscreen();
+                }
+            }
+        });
+
+        document.addEventListener('fullscreenchange', () => {
+            if (document.fullscreenElement) {
+                document.body.classList.add('zen-mode');
+                zenToggle.checked = true;
+            } else {
+                document.body.classList.remove('zen-mode');
+                zenToggle.checked = false;
+                // Unlock orientation when exiting fullscreen
+                if (screen.orientation && screen.orientation.unlock) {
+                    screen.orientation.unlock();
+                }
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && file) {
+                e.preventDefault(); 
+                if (isPlaying) {
+                    pauseReading();
+                } else {
+                    startReading();
+                }
+            }
+        });
+
+        // Reader Controls
+        rewindBtn.addEventListener('click', () => {
+            if (!file) return;
+            pauseReading();
+
+            if (ext === 'txt') {
+                let rewindCount = Math.min(10, readHistoryTxt.length);
+                if (rewindCount > 0) {
+                    const wordsToRestore = readHistoryTxt.splice(-rewindCount);
+                    wordQueue.unshift(...wordsToRestore);
+                    wordDisplay.innerHTML = formatWord(wordQueue[0]);
+                }
+            } else {
+                if (globalWordIndex > 0) {
+                    let rewindCount = 10;
+                    globalWordIndex = Math.max(0, globalWordIndex - rewindCount);
+                    wordQueue = globalWordList.slice(globalWordIndex, globalWordIndex + QUEUE_THRESHOLD);
+                    wordDisplay.innerHTML = formatWord(wordQueue[0]);
+                    saveProgress();
+                }
+            }
+            updateStats();
+        });
+
+        playBtn.addEventListener('click', startReading);
+        pauseBtn.addEventListener('click', pauseReading);
+        
+        resetBtn.addEventListener('click', () => {
+            pauseReading();
+            localStorage.setItem(`Kauman_progress_${file.name}`, 0); // Clear local memory
+            currentOffset = 0;
+            globalWordIndex = 0;
+            wordQueue = [];
+            readHistoryTxt = [];
+            
+            if (ext === 'txt') {
+                fetchNextChunkLocally().then(() => {
+                    wordDisplay.innerHTML = wordQueue.length ? formatWord(wordQueue[0]) : `<div class="word-wrapper">Ready</div>`;
+                });
+            } else {
+                wordQueue = globalWordList.slice(0, QUEUE_THRESHOLD);
+                wordDisplay.innerHTML = wordQueue.length ? formatWord(wordQueue[0]) : `<div class="word-wrapper">Ready</div>`;
+                updateStats();
+            }
+        });
+
+        async function fetchNextChunkLocally() {
+            if (!file || currentOffset >= file.size || ext !== 'txt') return;
+
+            const blob = file.slice(currentOffset, currentOffset + CHUNK_SIZE);
+            const text = await blob.text();
+
+            if (text.length === 0) return;
+
+            let validText = text;
+            let bytesToAdvance = blob.size;
+
+            if (currentOffset + CHUNK_SIZE < file.size) {
+                const lastSpaceMatch = text.match(/\s+[^\s]*$/);
+                if (lastSpaceMatch) {
+                    validText = text.substring(0, lastSpaceMatch.index);
+                    bytesToAdvance = new Blob([validText]).size;
+                }
+            }
+
+            const newWords = validText.trim().split(/\s+/).filter(w => w.length > 0);
+            wordQueue.push(...newWords);
+            
+            currentOffset += bytesToAdvance;
+            updateStats();
+        }
+
+        function startReading() {
+            if (wordQueue.length === 0 || isPlaying) return;
+            
+            isPlaying = true;
+            playBtn.disabled = true;
+            pauseBtn.disabled = false;
+            
+            function renderNextWord() {
+                if (!isPlaying) return;
+
+                if (wordQueue.length > 0) {
+                    const nextWord = wordQueue.shift();
+                    wordDisplay.innerHTML = formatWord(nextWord);
+                    
+                    if (ext === 'txt') {
+                        // Maintain buffer for .txt rewinding
+                        readHistoryTxt.push(nextWord);
+                        if (readHistoryTxt.length > 50) readHistoryTxt.shift();
+                    } else {
+                        globalWordIndex++;
+                        // Refill queue for fully loaded files
+                        if (wordQueue.length < 50 && (globalWordIndex + wordQueue.length) < globalWordList.length) {
+                            const addAmount = Math.min(100, globalWordList.length - (globalWordIndex + wordQueue.length));
+                            const startSlice = globalWordIndex + wordQueue.length;
+                            wordQueue.push(...globalWordList.slice(startSlice, startSlice + addAmount));
+                        }
+                    }
+                    saveProgress();
+                }
+
+                // Refill queue for chunked (.txt) files
+                if (ext === 'txt' && wordQueue.length < QUEUE_THRESHOLD && currentOffset < file.size) {
+                    fetchNextChunkLocally();
+                }
+
+                // Stop condition
+                const isFinished = ext === 'txt' ? (wordQueue.length === 0 && currentOffset >= file.size) : (globalWordIndex >= globalWordList.length);
+                if (isFinished) {
+                    wordDisplay.innerHTML = `<div class="word-wrapper">Done!</div>`;
+                    pauseReading();
+                    return;
+                }
+
+                const msPerWord = 60000 / wpm;
+                timerId = setTimeout(renderNextWord, msPerWord);
+                
+                // Update stats occasionally to save performance
+                if ((ext === 'txt' ? wordQueue.length : globalWordIndex) % 5 === 0) {
+                    updateStats();
+                }
+            }
+
+            renderNextWord();
+        }
+
+        function pauseReading() {
+            isPlaying = false;
+            clearTimeout(timerId);
+            if (file) {
+                playBtn.disabled = false;
+                pauseBtn.disabled = true;
+                updateStats(); 
+            }
+        }
+
+        function updateStats() {
+            if (!file) return;
+            let progress = "0.00";
+            
+            if (ext === 'txt') {
+                progress = ((currentOffset / file.size) * 100).toFixed(2);
+            } else {
+                if (globalWordList.length > 0) {
+                    progress = ((globalWordIndex / globalWordList.length) * 100).toFixed(2);
+                }
+            }
+            
+            statsDisplay.innerHTML = `File Progress: ${progress}% <br><small>(Tip: Use the Spacebar to Play/Pause)</small>`;
+        }
+    </script>
+</body>
+</html>
